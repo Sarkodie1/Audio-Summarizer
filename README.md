@@ -48,82 +48,116 @@ curl -X POST "http://audiosummariz-env.eba-nmjnb2ie.eu-north-1.elasticbeanstalk.
 ```
 
 ## React Native Integration
-Below is an example of how to integrate the API into a React Native app using the `axios` library.
+**Prerequisites**
+Ensure you have the following libraries installed in your React Native project:
 
-Step 1: Install Axios
-First, install axios if you haven't already:
+`react-native-callkeep`
+`react-native-audio-record`
+`react-native-fs`
+### Step-by-Step Guide**
+**1. Setup CallKeep and AudioRecord**
+Install and configure the necessary libraries to handle call events and record audio.
+
 ```bash
-npm install axios
+npm install react-native-callkeep react-native-audio-record react-native-fs
 ```
-Step 2: Create a Function to Upload and Summarize Audio
+
+**2. Capture Call Audio**
+Use the following code to handle call events and record audio:
 ```javascript
-import axios from 'axios';
+import { useEffect } from 'react';
+import CallKeep from 'react-native-callkeep';
+import AudioRecord from 'react-native-audio-record';
+import RNFS from 'react-native-fs';
 
-const BASE_URL = 'http://audiosummariz-env.eba-nmjnb2ie.eu-north-1.elasticbeanstalk.com';
+const options = {
+  sampleRate: 16000,  // 16kHz
+  channels: 1,        // mono
+  bitsPerSample: 16,  // 16-bit
+  wavFile: 'call_audio.wav'  // output file name
+};
 
-const summarizeAudio = async (fileUri) => {
-  const formData = new FormData();
-  formData.append('file', {
-    uri: fileUri,
-    type: 'audio/wav',
-    name: 'audio.wav'
+AudioRecord.init(options);
+
+const startRecording = () => {
+  AudioRecord.start();
+};
+
+const stopRecording = async () => {
+  const audioFile = await AudioRecord.stop();
+  return audioFile;
+};
+
+useEffect(() => {
+  CallKeep.addEventListener('answerCall', () => {
+    startRecording();
   });
 
-  try {
-    const response = await axios.post(`${BASE_URL}/summarize-call`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
-    });
+  CallKeep.addEventListener('endCall', async () => {
+    const audioFile = await stopRecording();
+    uploadAudioFile(audioFile);
+  });
 
-    return response.data.summary;
-  } catch (error) {
-    console.error('Error uploading file:', error.response ? error.response.data : error.message);
-    throw error;
-  }
-};
-
-export default summarizeAudio;
+  return () => {
+    CallKeep.removeEventListener('answerCall');
+    CallKeep.removeEventListener('endCall');
+  };
+}, []);
 ```
-Step 3: Use the Function in Your Component
+
+**3. Upload Audio File and Get Summary**
+Use the following code to upload the recorded audio file to the API and get the summarized text:
 ```javascript
-import React, { useState } from 'react';
-import { View, Button, Text } from 'react-native';
-import * as DocumentPicker from 'expo-document-picker';
-import summarizeAudio from './path/to/your/summarizeAudioFunction';
-
-const AudioSummarizer = () => {
-  const [summary, setSummary] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const pickDocument = async () => {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: 'audio/*'
-    });
-
-    if (result.type === 'success') {
-      setLoading(true);
-      try {
-        const summaryText = await summarizeAudio(result.uri);
-        setSummary(summaryText);
-      } catch (error) {
-        console.error('Error summarizing audio:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
+const uploadAudioFile = async (filePath) => {
+  const file = {
+    uri: `file://${filePath}`,
+    type: 'audio/wav',
+    name: 'call_audio.wav'
   };
 
-  return (
-    <View>
-      <Button title="Pick an Audio File" onPress={pickDocument} />
-      {loading ? <Text>Loading...</Text> : <Text>{summary}</Text>}
-    </View>
-  );
-};
+  const formData = new FormData();
+  formData.append('file', file);
 
-export default AudioSummarizer;
+  try {
+    const response = await fetch('http://audiosummariz-env.eba-nmjnb2ie.eu-north-1.elasticbeanstalk.com/summarize-call', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error('Network response was not ok');
+    }
+
+    const result = await response.json();
+    console.log('Summary:', result.summary);
+    alert(`Summary: ${result.summary}`);
+  } catch (error) {
+    console.error('Error uploading file:', error);
+    alert('Failed to upload and summarize audio.');
+  }
+};
 ```
+
+## Detailed Flow
+**Recording Call Audio:**
+
+Start Recording: The `startRecording` function initiates audio recording when the call is answered.
+Stop Recording: The `stopRecording` function stops recording when the call ends and returns the path to the recorded audio file.
+
+**Uploading Audio File:**
+
+Prepare File: The recorded audio file is prepared for upload as a `multipart/form-data` request.
+API Request: The audio file is uploaded to the API endpoint `/summarize-call`.
+
+**Receiving Summarized Text:**
+
+API Response: The API processes the audio file and returns a JSON object containing the summarized text.
+Display Summary: The summarized text is displayed in the app.
+
+   
 ## Error Handling
 ### Common Errors
 413 Request Entity Too Large: Ensure the uploaded file is within the allowed size limit.
